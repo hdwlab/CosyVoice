@@ -13,6 +13,7 @@
 # limitations under the License.
 import os
 import time
+import contextlib
 from typing import Generator
 from tqdm import tqdm
 from hyperpyyaml import load_hyperpyyaml
@@ -24,9 +25,20 @@ from cosyvoice.utils.file_utils import logging
 from cosyvoice.utils.class_utils import get_model_type
 
 
+@contextlib.contextmanager
+def _suppress_cuda_init():
+    """Prevent YAML !apply:torch.cuda.manual_seed_all from initializing the CUDA context."""
+    original = torch.cuda.manual_seed_all
+    torch.cuda.manual_seed_all = lambda *args, **kwargs: None
+    try:
+        yield
+    finally:
+        torch.cuda.manual_seed_all = original
+
+
 class CosyVoice:
 
-    def __init__(self, model_dir, load_jit=False, load_trt=False, fp16=False, trt_concurrent=1):
+    def __init__(self, model_dir, load_jit=False, load_trt=False, fp16=False, trt_concurrent=1, device=None):
         self.model_dir = model_dir
         self.fp16 = fp16
         if not os.path.exists(model_dir):
@@ -34,7 +46,9 @@ class CosyVoice:
         hyper_yaml_path = '{}/cosyvoice.yaml'.format(model_dir)
         if not os.path.exists(hyper_yaml_path):
             raise ValueError('{} not found!'.format(hyper_yaml_path))
-        with open(hyper_yaml_path, 'r') as f:
+        _cpu_only = device is not None and torch.device(device).type == 'cpu'
+        ctx = _suppress_cuda_init() if _cpu_only else contextlib.nullcontext()
+        with open(hyper_yaml_path, 'r') as f, ctx:
             configs = load_hyperpyyaml(f)
         assert get_model_type(configs) == CosyVoiceModel, 'do not use {} for CosyVoice initialization!'.format(model_dir)
         self.frontend = CosyVoiceFrontEnd(configs['get_tokenizer'],
@@ -42,12 +56,14 @@ class CosyVoice:
                                           '{}/campplus.onnx'.format(model_dir),
                                           '{}/speech_tokenizer_v1.onnx'.format(model_dir),
                                           '{}/spk2info.pt'.format(model_dir),
-                                          configs['allowed_special'])
+                                          configs['allowed_special'],
+                                          device=device)
         self.sample_rate = configs['sample_rate']
-        if torch.cuda.is_available() is False and (load_jit is True or load_trt is True or fp16 is True):
+        use_cuda = torch.cuda.is_available() and (device is None or torch.device(device).type == 'cuda')
+        if not use_cuda and (load_jit is True or load_trt is True or fp16 is True):
             load_jit, load_trt, fp16 = False, False, False
             logging.warning('no cuda device, set load_jit/load_trt/fp16 to False')
-        self.model = CosyVoiceModel(configs['llm'], configs['flow'], configs['hift'], fp16)
+        self.model = CosyVoiceModel(configs['llm'], configs['flow'], configs['hift'], fp16, device=device)
         self.model.load('{}/llm.pt'.format(model_dir),
                         '{}/flow.pt'.format(model_dir),
                         '{}/hift.pt'.format(model_dir))
@@ -138,7 +154,7 @@ class CosyVoice:
 
 class CosyVoice2(CosyVoice):
 
-    def __init__(self, model_dir, load_jit=False, load_trt=False, load_vllm=False, fp16=False, trt_concurrent=1):
+    def __init__(self, model_dir, load_jit=False, load_trt=False, load_vllm=False, fp16=False, trt_concurrent=1, device=None):
         self.model_dir = model_dir
         self.fp16 = fp16
         if not os.path.exists(model_dir):
@@ -146,7 +162,9 @@ class CosyVoice2(CosyVoice):
         hyper_yaml_path = '{}/cosyvoice2.yaml'.format(model_dir)
         if not os.path.exists(hyper_yaml_path):
             raise ValueError('{} not found!'.format(hyper_yaml_path))
-        with open(hyper_yaml_path, 'r') as f:
+        _cpu_only = device is not None and torch.device(device).type == 'cpu'
+        ctx = _suppress_cuda_init() if _cpu_only else contextlib.nullcontext()
+        with open(hyper_yaml_path, 'r') as f, ctx:
             configs = load_hyperpyyaml(f, overrides={'qwen_pretrain_path': os.path.join(model_dir, 'CosyVoice-BlankEN')})
         assert get_model_type(configs) == CosyVoice2Model, 'do not use {} for CosyVoice2 initialization!'.format(model_dir)
         self.frontend = CosyVoiceFrontEnd(configs['get_tokenizer'],
@@ -154,12 +172,14 @@ class CosyVoice2(CosyVoice):
                                           '{}/campplus.onnx'.format(model_dir),
                                           '{}/speech_tokenizer_v2.onnx'.format(model_dir),
                                           '{}/spk2info.pt'.format(model_dir),
-                                          configs['allowed_special'])
+                                          configs['allowed_special'],
+                                          device=device)
         self.sample_rate = configs['sample_rate']
-        if torch.cuda.is_available() is False and (load_jit is True or load_trt is True or load_vllm is True or fp16 is True):
+        use_cuda = torch.cuda.is_available() and (device is None or torch.device(device).type == 'cuda')
+        if not use_cuda and (load_jit is True or load_trt is True or load_vllm is True or fp16 is True):
             load_jit, load_trt, load_vllm, fp16 = False, False, False, False
             logging.warning('no cuda device, set load_jit/load_trt/load_vllm/fp16 to False')
-        self.model = CosyVoice2Model(configs['llm'], configs['flow'], configs['hift'], fp16)
+        self.model = CosyVoice2Model(configs['llm'], configs['flow'], configs['hift'], fp16, device=device)
         self.model.load('{}/llm.pt'.format(model_dir),
                         '{}/flow.pt'.format(model_dir),
                         '{}/hift.pt'.format(model_dir))
@@ -188,7 +208,7 @@ class CosyVoice2(CosyVoice):
 
 class CosyVoice3(CosyVoice2):
 
-    def __init__(self, model_dir, load_trt=False, load_vllm=False, fp16=False, trt_concurrent=1):
+    def __init__(self, model_dir, load_trt=False, load_vllm=False, fp16=False, trt_concurrent=1, device=None):
         self.model_dir = model_dir
         self.fp16 = fp16
         if not os.path.exists(model_dir):
@@ -196,7 +216,9 @@ class CosyVoice3(CosyVoice2):
         hyper_yaml_path = '{}/cosyvoice3.yaml'.format(model_dir)
         if not os.path.exists(hyper_yaml_path):
             raise ValueError('{} not found!'.format(hyper_yaml_path))
-        with open(hyper_yaml_path, 'r') as f:
+        _cpu_only = device is not None and torch.device(device).type == 'cpu'
+        ctx = _suppress_cuda_init() if _cpu_only else contextlib.nullcontext()
+        with open(hyper_yaml_path, 'r') as f, ctx:
             configs = load_hyperpyyaml(f, overrides={'qwen_pretrain_path': os.path.join(model_dir, 'CosyVoice-BlankEN')})
         assert get_model_type(configs) == CosyVoice3Model, 'do not use {} for CosyVoice3 initialization!'.format(model_dir)
         self.frontend = CosyVoiceFrontEnd(configs['get_tokenizer'],
@@ -204,12 +226,14 @@ class CosyVoice3(CosyVoice2):
                                           '{}/campplus.onnx'.format(model_dir),
                                           '{}/speech_tokenizer_v3.onnx'.format(model_dir),
                                           '{}/spk2info.pt'.format(model_dir),
-                                          configs['allowed_special'])
+                                          configs['allowed_special'],
+                                          device=device)
         self.sample_rate = configs['sample_rate']
-        if torch.cuda.is_available() is False and (load_trt is True or fp16 is True):
+        use_cuda = torch.cuda.is_available() and (device is None or torch.device(device).type == 'cuda')
+        if not use_cuda and (load_trt is True or fp16 is True):
             load_trt, fp16 = False, False
             logging.warning('no cuda device, set load_trt/fp16 to False')
-        self.model = CosyVoice3Model(configs['llm'], configs['flow'], configs['hift'], fp16)
+        self.model = CosyVoice3Model(configs['llm'], configs['flow'], configs['hift'], fp16, device=device)
         self.model.load('{}/llm.pt'.format(model_dir),
                         '{}/flow.pt'.format(model_dir),
                         '{}/hift.pt'.format(model_dir))

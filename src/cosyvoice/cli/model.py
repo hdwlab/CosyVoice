@@ -32,8 +32,12 @@ class CosyVoiceModel:
                  llm: torch.nn.Module,
                  flow: torch.nn.Module,
                  hift: torch.nn.Module,
-                 fp16: bool = False):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                 fp16: bool = False,
+                 device=None):
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device) if isinstance(device, str) else device
         self.llm = llm
         self.flow = flow
         self.hift = hift
@@ -52,7 +56,7 @@ class CosyVoiceModel:
         # rtf and decoding related
         self.stream_scale_factor = 1
         assert self.stream_scale_factor >= 1, 'stream_scale_factor should be greater than 1, change it according to your actual rtf'
-        self.llm_context = torch.cuda.stream(torch.cuda.Stream(self.device)) if torch.cuda.is_available() else nullcontext()
+        self.llm_context = torch.cuda.stream(torch.cuda.Stream(self.device)) if self.device.type == 'cuda' else nullcontext()
         self.lock = threading.Lock()
         # dict used to store session related variable
         self.tts_speech_token_dict = {}
@@ -237,7 +241,7 @@ class CosyVoiceModel:
             self.mel_overlap_dict.pop(this_uuid)
             self.hift_cache_dict.pop(this_uuid)
             self.flow_cache_dict.pop(this_uuid)
-        if torch.cuda.is_available():
+        if self.device.type == 'cuda':
             torch.cuda.empty_cache()
             torch.cuda.current_stream().synchronize()
 
@@ -248,8 +252,12 @@ class CosyVoice2Model(CosyVoiceModel):
                  llm: torch.nn.Module,
                  flow: torch.nn.Module,
                  hift: torch.nn.Module,
-                 fp16: bool = False):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                 fp16: bool = False,
+                 device=None):
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device) if isinstance(device, str) else device
         self.llm = llm
         self.flow = flow
         self.hift = hift
@@ -266,7 +274,7 @@ class CosyVoice2Model(CosyVoiceModel):
         # speech fade in out
         self.speech_window = np.hamming(2 * self.source_cache_len)
         # rtf and decoding related
-        self.llm_context = torch.cuda.stream(torch.cuda.Stream(self.device)) if torch.cuda.is_available() else nullcontext()
+        self.llm_context = torch.cuda.stream(torch.cuda.Stream(self.device)) if self.device.type == 'cuda' else nullcontext()
         self.lock = threading.Lock()
         # dict used to store session related variable
         self.tts_speech_token_dict = {}
@@ -389,7 +397,7 @@ class CosyVoice2Model(CosyVoiceModel):
             self.tts_speech_token_dict.pop(this_uuid)
             self.llm_end_dict.pop(this_uuid)
             self.hift_cache_dict.pop(this_uuid)
-        if torch.cuda.is_available():
+        if self.device.type == 'cuda':
             torch.cuda.empty_cache()
             torch.cuda.current_stream().synchronize()
 
@@ -400,8 +408,12 @@ class CosyVoice3Model(CosyVoice2Model):
                  llm: torch.nn.Module,
                  flow: torch.nn.Module,
                  hift: torch.nn.Module,
-                 fp16: bool = False):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                 fp16: bool = False,
+                 device=None):
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device) if isinstance(device, str) else device
         self.llm = llm
         self.flow = flow
         self.hift = hift
@@ -413,7 +425,7 @@ class CosyVoice3Model(CosyVoice2Model):
         self.stream_scale_factor = 2
         assert self.stream_scale_factor >= 1, 'stream_scale_factor should be greater than 1, change it according to your actual rtf'
         # rtf and decoding related
-        self.llm_context = torch.cuda.stream(torch.cuda.Stream(self.device)) if torch.cuda.is_available() else nullcontext()
+        self.llm_context = torch.cuda.stream(torch.cuda.Stream(self.device)) if self.device.type == 'cuda' else nullcontext()
         self.lock = threading.Lock()
         # dict used to store session related variable
         self.tts_speech_token_dict = {}
